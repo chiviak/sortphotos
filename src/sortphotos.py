@@ -111,7 +111,7 @@ def parse_date_exif(date_string):
 
 
 
-def get_oldest_timestamp(data, additional_groups_to_ignore, additional_tags_to_ignore, print_all_tags=False):
+def get_oldest_timestamp(data, additional_groups_to_ignore, additional_tags_to_ignore, print_all_tags=True):
     """data as dictionary from json.  Should contain only time stamps except SourceFile"""
 
     # save only the oldest date
@@ -122,9 +122,9 @@ def get_oldest_timestamp(data, additional_groups_to_ignore, additional_tags_to_i
     # save src file
     src_file = data['SourceFile']
 
-    # ssetup tags to ignore
+    # setup tags to ignore
     ignore_groups = ['ICC_Profile'] + additional_groups_to_ignore
-    ignore_tags = ['SourceFile', 'XMP:HistoryWhen'] + additional_tags_to_ignore
+    ignore_tags = ['SourceFile', 'XMP:HistoryWhen', 'File:MIMEType'] + additional_tags_to_ignore
 
 
     if print_all_tags:
@@ -176,6 +176,18 @@ def check_for_early_morning_photos(date, day_begins):
         date = date - timedelta(hours=date.hour+1)  # push it to the day before for classificiation purposes
 
     return date
+
+
+def get_filetype(data):
+    """extract the file type from the exif data. Return 'Photo', 'Video', or 'Unknown'"""
+
+    mimetype = data['File:MIMEType']
+    if mimetype.startswith('image'):
+        return 'Photo'
+    elif mimetype.startswith('video'):
+        return 'Video'
+
+    return 'Unknown' 
 
 
 #  this class is based on code from Sven Marnach (http://stackoverflow.com/questions/10075115/call-exiftool-from-a-python-script)
@@ -294,7 +306,7 @@ def sortPhotos(src_dir, dest_dir, sort_format, rename_format, recursive=False,
     if recursive:
         args += ['-r']
 
-    args += [src_dir]
+    args += [src_dir,'-File:MIMEType']
 
 
     # get all metadata
@@ -302,6 +314,7 @@ def sortPhotos(src_dir, dest_dir, sort_format, rename_format, recursive=False,
         print('Preprocessing with ExifTool.  May take a while for a large number of files.')
         sys.stdout.flush()
         metadata = e.get_metadata(*args)
+
 
     # setup output to screen
     num_files = len(metadata)
@@ -318,6 +331,9 @@ def sortPhotos(src_dir, dest_dir, sort_format, rename_format, recursive=False,
 
         # fixes further errors when using unicode characters like "\u20AC"
         src_file.encode('utf-8')
+
+	# find the filetype
+	filetype = get_filetype(data)
 
         if verbose:
         # write out which photo we are at
@@ -369,7 +385,9 @@ def sortPhotos(src_dir, dest_dir, sort_format, rename_format, recursive=False,
 
         if rename_format is not None:
             _, ext = os.path.splitext(filename)
-            filename = date.strftime(rename_format) + ext.lower()
+            rename_format_type = rename_format.replace('#T',filetype)
+            rename_format_file = rename_format_type.replace('#F',os.path.split(os.path.splitext(filename)[0])[1])
+            filename = date.strftime(rename_format_file) + ext.lower()
 
         # setup destination file
         dest_file = os.path.join(dest_file, filename.encode('utf-8'))
@@ -457,6 +475,8 @@ def main():
     parser.add_argument('--rename', type=str, default=None,
                         help="rename file using format codes \n\
     https://docs.python.org/2/library/datetime.html#strftime-and-strptime-behavior. \n\
+    you can use '#T' to include the media type (i.e. photo, video)  \n\
+    you can use '#F' to add the filename (without extension) \n\
     default is None which just uses original filename")
     parser.add_argument('--keep-duplicates', action='store_true',
                         help='If file is a duplicate keep it anyway (after renaming).')
